@@ -217,6 +217,7 @@
       <!-- Toolbar -->
       <div class="toolbar">
         <button id="btnAddRow">Add Row</button>
+        <button id="btnAddProduct">Add Product</button>
         <button id="btnDownloadInvCSV">Download Inventory (CSV)</button>
         <input type="file" id="uploadInventory" accept=".csv,.xlsx,.xls" style="display:none" />
         <button id="btnImportInv">Import Inventory (CSV/XLSX)</button>
@@ -430,6 +431,7 @@ function initInvoice(){
 
   // wire static buttons safely
   document.getElementById('btnAddRow').addEventListener('click', addRow);
+  document.getElementById('btnAddProduct').addEventListener('click', addProductManually);
   document.getElementById('btnDownloadInvCSV').addEventListener('click', downloadInventoryCSV);
   document.getElementById('btnImportInv').addEventListener('click', function(){ document.getElementById('uploadInventory').click(); });
   document.getElementById('btnExportXLSX').addEventListener('click', exportInvoiceExcel);
@@ -498,6 +500,25 @@ function lookupProduct(select){
   }
   tr.querySelector('.descPrint').textContent = val;
   refresh();
+}
+
+/* ===== NEW: Add Product Manually (non-breaking) ===== */
+function addProductManually(){
+  // simple prompt flow: name, unit, price
+  var name = (prompt('Enter product name (e.g. "BANANA")')||'').trim();
+  if(!name){ toast('Product creation cancelled'); return; }
+  if(inventory[name]){
+    if(!confirm('Product "'+name+'" already exists. Overwrite?')){ toast('No changes made'); return; }
+  }
+  var unit = (prompt('Enter unit / UOM (e.g. kg, box, pcs)', 'kg')||'').trim();
+  var priceStr = (prompt('Enter unit price (numeric, e.g. 3.50)','0')||'').trim();
+  var price = parseFloat(priceStr);
+  if(isNaN(price)){
+    toast('Invalid price — product not added', true); return;
+  }
+  inventory[name] = { unit: unit, price: price };
+  rebuildInventoryDropdowns();
+  toast('Product "'+name+'" added');
 }
 
 /* ===== REFRESH totals ===== */
