@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Invoice Generator</title>
+
+  <!-- XLSX for Excel export -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <style>
+    :root { --accent:#0b5; }
+    body{font-family:Arial, sans-serif; background:#f5f5f5; margin:0}
+
+    /* Login */
+    #loginPage{display:flex; justify-content:center; align-items:center; min-height:100vh}
+    .login-box{background:#fff; padding:28px; border-radius:10px; box-shadow:0 6px 18px rgba(0,0,0,.12); width:320px; max-width:92vw}
+    .login-box h2{margin:0 0 12px; text-align:center}
+    .login-box input{width:100%; padding:12px; margin:8px 0; border:1px solid #cbd5e1; border-radius:8px; font-size:16px}
+    .login-box button{width:100%; padding:12px; border:none; border-radius:8px; background:#111827; color:#fff; font-weight:700; cursor:pointer; font-size:16px}
+    .login-error{color:#b91c1c; text-align:center; display:none}
+
+    /* App */
+    #app{display:none}
+    .container{max-width:900px; margin:16px auto; background:#fff; padding:15px; border-radius:6px; box-shadow:0 3px 8px rgba(0,0,0,0.1)}
+
+    .toolbar{margin-bottom:10px; display:flex; gap:6px; flex-wrap:wrap; align-items:center}
+    .toolbar button{padding:8px 12px; border:none; border-radius:6px; cursor:pointer; background:#333; color:#fff; font-size:14px}
+    .toolbar .clear{background:#9a3412}
+    .toolbar .download{background:var(--accent)}
+    .toolbar .logout{background:#8b0000; margin-left:auto}
+
+    .right{text-align:right; margin-top:8px; font-size:13px}
+    .amountWords{margin-top:5px; font-style:italic; font-size:12px}
+
+    #toast{position:fixed; right:16px; bottom:16px; background:#166534; color:#fff; padding:10px 14px; border-radius:6px; box-shadow:0 4px 14px rgba(0,0,0,.2); opacity:0; pointer-events:none; transition:opacity .25s, transform .25s; transform:translateY(8px); z-index:9999}
+    #toast.show{opacity:1; transform:translateY(0)}
+    #toast.error{background:#7f1d1d}
+
+    .cust-controls{display:flex; gap:6px; margin-top:6px; flex-wrap:wrap}
+
+    /* Remove underline on Bill To & Address */
+    #billTo, #billAddr{border:none !important; outline:none;}
+
+    /* Table (desktop baseline) */
+    table{width:100%; border-collapse:collapse; margin-top:10px; font-size:13px; min-width:720px}
+    table, th, td{border:1px solid #ccc}
+    th, td{padding:5px; text-align:left}
+    .center{text-align:center}
+    .num{text-align:right}
+    .table-wrap{width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch}
+
+    .screen-only{display:block}
+    .print-only{display:none}
+
+    /* Export/Print cleanup */
+    .exporting .toolbar,
+    .exporting .desc,
+    .exporting button.logout,
+    .exporting .login-container,
+    .exporting .cust-controls,
+    .exporting #customerSelect,
+    .exporting #copyTypeSelect,
+    .exporting .pay-controls,
+    .exporting td:last-child,
+    .exporting th:last-child{display:none !important}
+    .exporting table, .exporting th, .exporting td{border:none}
+    .exporting input, .exporting select, .exporting textarea{border:none}
+    .exporting .descPrint{display:inline !important}
+    .exporting .container{box-shadow:none; border-radius:0}
+    .exporting .screen-only{display:none !important}
+    .exporting .print-only{display:block !important}
+
+    /* Hide Payment Details border only in export/print */
+    #paymentDetails{border:1px solid #ccc;}
+    .exporting #paymentDetails{border:none !important;}
+    @media print{ 
+      body{background:#fff}
+      .toolbar, .desc, button.logout, .login-container, .cust-controls, #customerSelect, #copyTypeSelect, .pay-controls, td:last-child, th:last-child, .screen-only input, .screen-only select{display:none !important}
+      table, th, td{border:none}
+      input, select, textarea{border:none}
+      #paymentDetails{border:none !important;}
+      .descPrint{display:inline !important}
+      .container{box-shadow:none; border-radius:0}
+      .screen-only{display:none !important}
+      .print-only{display:block !important}
+      @page{size:auto; margin:12mm}
+    }
+
+    /* ====== MOBILE (safe, non-breaking) ====== */
+    @media (max-width: 720px){
+      .container{margin:8px; padding:12px}
+      .toolbar{gap:8px}
+      .toolbar button{flex:1 1 140px; font-size:15px; padding:12px}
+      .toolbar .logout{margin-left:0}
+
+      /* Header stacks */
+      .screen-only{border-bottom-width:2px}
+      .screen-only > div{width:100%}
+      .screen-only{display:flex; flex-direction:column; gap:10px}
+      #logoImgScreen{height:42px}
+      .screen-only h2{font-size:16px}
+      .screen-only h3{font-size:15px}
+      .screen-only input, .screen-only select{font-size:15px}
+
+      /* Inputs / selects */
+      input[type="text"], input[type="date"]{font-size:16px}
+      select{font-size:16px}
+
+      /* Table scroll */
+      .table-wrap{margin-top:8px}
+      table{min-width:680px}
+
+      /* Totals left-align on small screens */
+      .right{text-align:left}
+
+      /* Bottom boxes stack */
+      .bottom-grid{flex-direction:column; gap:12px}
+      .bottom-grid > div{width:100% !important}
+      .pay-controls{gap:6px}
+      .pay-controls > *{flex:1 1 auto}
+    }
+  </style>
+</head>
+<body>
+  <!-- Login -->
+  <div id="loginPage">
+    <div class="login-box">
+      <h2>Login</h2>
+      <input type="text" id="username" placeholder="Username" autocomplete="username">
+      <input type="password" id="password" placeholder="Password" autocomplete="current-password">
+      <button id="loginBtn" onclick="return login(event)" type="submit">Login</button>
+      <p class="login-error" id="loginError">Invalid credentials</p>
+    </div>
+  </div>
+
+  <!-- App -->
+  <div id="app">
+    <div id="toast"></div>
+    <div class="container" id="invoiceRoot">
+
+      <!-- Screen Header -->
+      <div class="screen-only" style="border-bottom:2px solid #0b0; padding-bottom:6px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:flex-start;">
+        <div style="display:flex; align-items:center;">
+          <img id="logoImgScreen" src="logo.png" alt="Royal Roots Logo" style="height:50px; margin-right:8px;" crossorigin="anonymous">
+          <div>
+            <h2 style="margin:0; font-size:18px;">ROYAL ROOTS PTE. LTD.</h2>
+            <div style="font-size:12px; font-weight:600;">134 JURONG GATEWAY ROAD, #04-309N, SINGAPORE 600134</div>
+            <div style="font-size:12px;">Email: contactroyalroots@gmail.com</div>
+          </div>
+        </div>
+        <div style="text-align:right; font-size:12px;">
+          <h3 style="margin:0; font-size:14px;">INVOICE <span style="font-size:11px" id="copyTypeLabel">(Customer Copy)</span></h3>
+          <div>Invoice #: <input type="text" id="invNo" value="INV-0000001" style="border:none; border-bottom:1px dotted #666; font-size:12px;"></div>
+          <div>Invoice date: <input type="date" id="invDate" style="font-size:12px;"></div>
+          <div>
+            <select id="copyTypeSelect" onchange="updateCopyType()">
+              <option value="Customer Copy" selected>Customer Copy</option>
+              <option value="Original Copy">Original Copy</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Print/Export Header -->
+      <div id="printHeader" class="print-only" style="display:none; border-bottom:2px solid #0b0; padding-bottom:6px; margin-bottom:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <div style="display:flex; align-items:center;">
+            <img id="logoImgPrint" src="logo.png" alt="Royal Roots Logo" style="height:50px; margin-right:8px;" crossorigin="anonymous">
+            <div>
+              <div style="font-weight:700; font-size:18px;">ROYAL ROOTS PTE. LTD.</div>
+              <div style="font-size:12px; font-weight:600;">134 JURONG GATEWAY ROAD, #04-309N, SINGAPORE 600134</div>
+              <div style="font-size:12px;">Email: contactroyalroots@gmail.com</div>
+            </div>
+          </div>
+          <div style="text-align:right; font-size:12px;">
+            <div style="font-size:14px; font-weight:700;">INVOICE <span id="phCopyType" style="font-size:11px">(Customer Copy)</span></div>
+            <div><b>Invoice #:</b> <span id="phInvNo">INV-0000001</span></div>
+            <div><b>Invoice date:</b> <span id="phInvDate">--/--/----</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Customer section -->
+      <div style="margin-bottom:12px; font-size:13px;">
+        <div style="margin-top:6px;">
+          <b>Bill to:</b> <input type="text" id="billTo" placeholder="Customer Name" style="font-size:13px; max-width:100%;">
+        </div>
+        <div style="margin-top:6px;">
+          <b>Address:</b> <input type="text" id="billAddr" placeholder="Address" style="font-size:13px; width:80%; max-width:100%;">
+        </div>
+        <div class="cust-controls">
+          <select id="customerSelect" onchange="onSelectCustomer(this)">
+            <option value="">-- Select Customer --</option>
+          </select>
+          <input type="file" id="uploadCustomers" accept=".csv" style="display:none" />
+          <button onclick="document.getElementById('uploadCustomers').click()">Import Customers (CSV)</button>
+          <button onclick="downloadCustomersCSV()">Download Customers (CSV)</button>
+        </div>
+      </div>
+
+      <!-- Toolbar -->
+      <div class="toolbar">
+        <button onclick="addRow()">Add Row</button>
+        <button onclick="downloadInventoryCSV()">Download Inventory (CSV)</button>
+        <input type="file" id="uploadInventory" accept=".csv,.xlsx,.xls" style="display:none" />
+        <button onclick="document.getElementById('uploadInventory').click()">Import Inventory (CSV/XLSX)</button>
+        <button onclick="exportInvoiceExcel()">Export Invoice (Excel)</button>
+        <button class="clear" onclick="clearInvoice()">Clear Data</button>
+        <button class="download" onclick="downloadPDF()">Download PDF</button>
+        <button class="logout" onclick="logout()">Logout</button>
+      </div>
+
+      <!-- Items (wrapped for horizontal scroll on mobile) -->
+      <div class="table-wrap">
+        <table id="items">
+          <thead>
+            <tr>
+              <th style="width:40px">#</th>
+              <th>Description</th>
+              <th style="width:60px" class="center">Qty</th>
+              <th style="width:80px" class="center">Per Unit</th>
+              <th style="width:90px" class="center">Unit Price ($)</th>
+              <th style="width:100px" class="center">Total ($)</th>
+              <th style="width:30px">⨯</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <!-- Totals -->
+      <div class="right">
+        <p><b>Subtotal:</b> <span id="subTotal">$0.00</span></p>
+        <p><b>GST (9%):</b> <span id="gstAmount">$0.00</span></p>
+        <p><b>Total:</b> <span id="grandTotal">$0.00</span></p>
+        <div class="amountWords" id="amountWords">Amount in words: Zero Dollars Only</div>
+      </div>
+
+      <!-- Bottom boxes -->
+      <div class="bottom-grid" style="display:flex; justify-content:space-between; margin-top:30px; font-size:13px; gap:12px;">
+        <div style="border:1px solid #000; width:45%; padding:10px;">
+          <b>Invoice Received and Verified By</b>
+          <div style="height:40px;"></div>
+        </div>
+
+        <div style="border:1px solid #000; width:45%; padding:10px;">
+          <div class="pay-head" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+            <b>Payment Details:</b>
+            <div class="pay-controls" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+              <select id="paymentSelect" onchange="onSelectPayment(this)">
+                <option value="">-- Select Payment --</option>
+              </select>
+              <input type="file" id="uploadPayments" accept=".csv" style="display:none" />
+              <button onclick="document.getElementById('uploadPayments').click()">Import Payments (CSV)</button>
+              <button onclick="downloadPaymentsCSV()">Download Payments (CSV)</button>
+            </div>
+          </div>
+          <!-- NOTE: removed inline border; controlled by CSS so it disappears in PDF/print -->
+          <textarea id="paymentDetails" style="width:100%; height:80px; resize:vertical; margin-top:6px" placeholder="Enter payment instructions (bank, PayNow, etc.)"></textarea>
+        </div>
+      </div>
+
+      <div style="text-align:center; margin-top:20px; font-size:12px;"><i>This is system Generated Invoice</i></div>
+    </div>
+  </div>
+
+<script>
+  // Guard
+  window.onerror = function(msg){ try{ toast('Error: '+msg, true); }catch(_){} };
+
+  // ===== LOGIN =====
+  function showApp(){
+    document.getElementById('loginPage').style.display='none';
+    document.getElementById('app').style.display='block';
+    initInvoice();
+  }
+  function login(e){
+    if(e && e.preventDefault) e.preventDefault();
+    var u = (document.getElementById('username').value||'').trim();
+    var p = (document.getElementById('password').value||'').trim();
+    var err = document.getElementById('loginError');
+    if(u==='admin' && p==='sharvil'){
+      try{ localStorage.setItem('rr_logged_in','1'); }catch(_){}
+      if(err) err.style.display='none';
+      showApp();
+      return false;
+    } else {
+      if(err) err.style.display='block';
+      return false;
+    }
+  }
+  function logout(){ try{ localStorage.removeItem('rr_logged_in'); }catch(_){ } location.reload(); }
+
+  // ===== COPY TYPE =====
+  function updateCopyType(){
+    var sel=document.getElementById('copyTypeSelect');
+    var label=document.getElementById('copyTypeLabel');
+    if(sel && label) label.textContent='(' + sel.value + ')';
+  }
+
+  // ===== PRINT HEADER FILL =====
+  function formatDateDDMMYYYY(iso){
+    if(!iso) return '';
+    var d=new Date(iso+'T00:00:00'); if(!isFinite(d)) return iso;
+    var dd=('0'+d.getDate()).slice(-2), mm=('0'+(d.getMonth()+1)).slice(-2), yy=d.getFullYear();
+    return dd+'/'+mm+'/'+yy;
+  }
+  function fillPrintHeader(){
+    var invNo=(document.getElementById('invNo')||{}).value || 'INV-0000001';
+    var invDate=(document.getElementById('invDate')||{}).value || '';
+    var copyTxt=(document.getElementById('copyTypeSelect')||{}).value || 'Customer Copy';
+    var phInvNo=document.getElementById('phInvNo'); if(phInvNo) phInvNo.textContent=invNo;
+    var phInvDate=document.getElementById('phInvDate'); if(phInvDate) phInvDate.textContent=invDate?formatDateDDMMYYYY(invDate):'';
+    var phCopy=document.getElementById('phCopyType'); if(phCopy) phCopy.textContent='('+copyTxt+')';
+  }
+
+  // ===== PDF (on-demand html2pdf loader) =====
+  function loadHtml2PdfIfNeeded(){
+    return new Promise(function(resolve, reject){
+      if(window.html2pdf){ resolve(); return; }
+      var s=document.createElement('script');
+      s.src='https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+      s.onload=function(){ resolve(); };
+      s.onerror=function(){ reject(new Error('Failed to load html2pdf')); };
+      document.head.appendChild(s);
+    });
+  }
+  async function downloadPDF(){
+    try{ await loadHtml2PdfIfNeeded(); }
+    catch(err){ console.error(err); toast('PDF library failed to load', true); return; }
+    fillPrintHeader();
+    var root=document.getElementById('invoiceRoot');
+    var prevTitle=document.title;
+    document.title = (document.getElementById('invNo')||{}).value || 'Invoice';
+    document.body.classList.add('exporting');
+    try{
+      var safeNo=((document.getElementById('invNo')||{}).value || 'INV-0000001').replace(/[^A-Za-z0-9_-]/g,'');
+      var opt={
+        margin:10,
+        filename:'invoice_'+(safeNo||'invoice')+'.pdf',
+        image:{ type:'jpeg', quality:0.98 },
+        html2canvas:{ scale:2, useCORS:true, allowTaint:true, logging:false },
+        jsPDF:{ unit:'mm', format:'a4', orientation:'portrait' },
+        pagebreak:{ mode:['css','legacy'] }
+      };
+      await window.html2pdf().set(opt).from(root).save();
+    } catch(err){ console.error(err); toast('PDF export failed', true); }
+    finally { document.body.classList.remove('exporting'); document.title = prevTitle; }
+  }
+
+  // ===== DATA =====
+  var inventory = {
+    "CUCUMBER": {unit:"kg", price:1.90},
+    "CORIANDER LEAVES": {unit:"kg", price:8.80},
+    "MINT LEAVES": {unit:"kg", price:7.40},
+    "GINGER": {unit:"box", price:9.50},
+    "RAW MANGO": {unit:"kg", price:3.80}
+  };
+  var customers = {
+    "Sample Customer A":"123 Test Street, Singapore 600000",
+    "Sample Customer B":"45 Example Ave, Singapore 610000"
+  };
+  var paymentProfiles = {
+    "Default":"Bank: DBS 012-345678-9\nPayNow UEN: 201234567A\nTerms: Net 7 days",
+    "Sample Customer A":"PayNow: +65 9000 0000 (ROYAL ROOTS)",
+    "Sample Customer B":"Bank: OCBC 998-765432-1, Ref: INV#"
+  };
+
+  var tbodyRef;
+
+  // ===== INIT =====
+  function initInvoice(){
+    tbodyRef = document.querySelector('#items tbody');
+    document.getElementById('uploadInventory').addEventListener('change', onInventoryUpload);
+    document.getElementById('uploadCustomers').addEventListener('change', onCustomersUpload);
+    var upPay=document.getElementById('uploadPayments'); if(upPay){ upPay.addEventListener('change', onPaymentsUpload); }
+    rebuildPaymentDropdown();
+    rebuildCustomerDropdown();
+    if(!tbodyRef.children.length) addRow();
+    refresh();
+  }
+
+  // ===== HELPERS =====
+  function money(n){ return '$'+(Number(n)||0).toFixed(2); }
+  function optionsHTML(){ return Object.keys(inventory).sort().map(function(p){return '<option value="'+p+'">'+p+'</option>';}).join(''); }
+  function toast(msg,isError){ var el=document.getElementById('toast'); el.textContent=msg; el.classList.toggle('error', !!isError); el.classList.add('show'); setTimeout(function(){ el.classList.remove('show'); }, 1800); }
+
+  // ===== ROWS =====
+  function addRow(){
+    var tr=document.createElement('tr');
+    tr.innerHTML='\
+      <td class="idx"></td>\
+      <td><select class="desc" onchange="lookupProduct(this)"><option value="">-- Select Product --</option>'+optionsHTML()+'\
+      </select><span class="descPrint" style="display:none"></span></td>\
+      <td class="center"><input type="number" class="qty center" min="0" step="0.01" value="1" style="width:50px; text-align:center"></td>\
+      <td class="unit center"></td>\
+      <td class="center"><input type="number" class="price center" min="0" step="0.01" value="0" style="width:80px; text-align:center"></td>\
+      <td class="num total center">$0.00</td>\
+      <td><button onclick="this.closest(\'tr\').remove();refresh()">×</button></td>';
+    tbodyRef.appendChild(tr);
+    tr.querySelector('.qty').addEventListener('input', refresh);
+    tr.querySelector('.price').addEventListener('input', refresh);
+    refresh();
+  }
+
+  function lookupProduct(select){
+    var tr=select.closest('tr'); var val=select.value;
+    if(inventory[val]){ tr.querySelector('.unit').textContent=inventory[val].unit; tr.querySelector('.price').value=inventory[val].price; }
+    else { tr.querySelector('.unit').textContent=''; tr.querySelector('.price').value=0; }
+    tr.querySelector('.descPrint').textContent = val;
+    refresh();
+  }
+
+  function refresh(){
+    if(!tbodyRef) return;
+    var sub=0;
+    Array.prototype.forEach.call(tbodyRef.children, function(tr, i){
+      tr.querySelector('.idx').textContent=i+1;
+      var qty=parseFloat(tr.querySelector('.qty').value)||0;
+      var unitPrice=parseFloat(tr.querySelector('.price').value)||0;
+      var total=qty*unitPrice; sub+=total; tr.querySelector('.total').textContent=money(total);
+    });
+    var gst=sub*0.09; var grand=sub+gst;
+    document.getElementById('subTotal').textContent=money(sub);
+    document.getElementById('gstAmount').textContent=money(gst);
+    document.getElementById('grandTotal').textContent='SGD '+money(grand).replace(/^\$/,'');
+    document.getElementById('amountWords').textContent = 'Amount in words: SGD ' + toWords(grand);
+  }
+
+  function clearInvoice(){
+    if(!tbodyRef) return; tbodyRef.innerHTML='';
+    document.getElementById('billTo').value=''; document.getElementById('billAddr').value='';
+    document.getElementById('invNo').value='INV-0000001'; document.getElementById('invDate').value='';
+    addRow(); refresh(); toast('Invoice cleared');
+  }
+
+  // ===== AMOUNT IN WORDS =====
+  function toWords(num){
+    num = Math.round((Number(num) + Number.EPSILON) * 100);
+    var dollars = Math.floor(num / 100);
+    var cents = num % 100;
+    if(dollars===0 && cents===0) return 'Zero Dollars Only';
+    var ones=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine'];
+    var teens=['Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+    var tens=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+    function m(n){return n>=1e6? m(Math.floor(n/1e6))+' Million '+t(n%1e6):t(n);}
+    function t(n){return n>=1e3? h(Math.floor(n/1e3))+' Thousand '+h(n%1e3):h(n);}
+    function h(n){return n>99? ones[Math.floor(n/100)]+' Hundred '+u(n%1e2):u(n);}
+    function u(n){return n<10?ones[n]:(n<20?teens[n-10]:tens[Math.floor(n/10)]+' '+ones[n%10]);}
+    var words = dollars>0 ? m(dollars).trim()+' Dollar'+(dollars!==1?'s':'') : '';
+    if(cents>0){
+      var centWords = cents<10?ones[cents]:(cents<20?teens[cents-10]:tens[Math.floor(cents/10)]+' '+ones[cents%10]);
+      words += (words? ' and ':'') + centWords.trim() + ' Cent'+(cents!==1?'s':'');
+    }
+    return words + ' Only';
+  }
+
+  // ===== CUSTOMERS =====
+  function rebuildCustomerDropdown(){
+    var sel=document.getElementById('customerSelect');
+    var current=sel.value;
+    sel.innerHTML='<option value="">-- Select Customer --</option>' + Object.keys(customers).sort().map(function(n){return '<option value="'+n+'">'+n+'</option>';}).join('');
+    if(current && customers[current]) sel.value=current;
+  }
+  function onSelectCustomer(sel){
+    var name=sel.value; document.getElementById('billTo').value=name||''; document.getElementById('billAddr').value=customers[name]||'';
+    if(paymentProfiles[name]){ var ps=document.getElementById('paymentSelect'); if(ps){ ps.value=name; } var ta=document.getElementById('paymentDetails'); if(ta){ ta.value=paymentProfiles[name]; } }
+  }
+  function downloadCustomersCSV(){
+    var csv='Name,Address\n';
+    Object.keys(customers).forEach(function(n){ var a=customers[n]||''; csv += '"'+n.replace(/"/g,'""')+'","'+a.replace(/"/g,'""')+'"\n';});
+    var blob=new Blob([csv],{type:'text/csv'});
+    var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='customers.csv'; a.click(); URL.revokeObjectURL(a.href);
+  }
+  function onCustomersUpload(e){
+    var file=e.target.files[0]; if(!file) return; var reader=new FileReader();
+    reader.onload=function(){
+      try{
+        var rows=parseCSV(reader.result);
+        if(!rows.length){ toast('CSV had no rows',true); return; }
+        var headers=Object.keys(rows[0]).map(function(h){return String(h).toLowerCase();});
+        var find=function(arr){ return headers.findIndex(function(h){ return arr.indexOf(h)>-1; }); };
+        var iName=find(['name','customer','client']);
+        var iAddr=find(['address','addr','address line']);
+        if(iName<0){ toast('Missing Name column',true); return; }
+        var obj={};
+        rows.forEach(function(r){
+          var vals=Object.values(r);
+          var n=(vals[iName]||'').toString().trim(); if(!n) return;
+          var a=iAddr>-1 ? (vals[iAddr]||'').toString() : '';
+          obj[n]=a;
+        });
+        if(Object.keys(obj).length){ customers=obj; rebuildCustomerDropdown(); toast('Customers CSV imported'); }
+        else toast('CSV had no valid customers',true);
+      }catch(err){ console.error(err); toast('Invalid customers CSV',true); }
+    };
+    reader.readAsText(file);
+  }
+
+  // ===== PAYMENTS =====
+  function rebuildPaymentDropdown(){
+    var sel=document.getElementById('paymentSelect'); if(!sel) return;
+    var current=sel.value;
+    sel.innerHTML='<option value="">-- Select Payment --</option>' + Object.keys(paymentProfiles).sort().map(function(n){return '<option value="'+n+'">'+n+'</option>';}).join('');
+    if(current && paymentProfiles[current]) sel.value=current;
+  }
+  function onSelectPayment(sel){
+    var key=sel.value; var ta=document.getElementById('paymentDetails');
+    if(ta) ta.value = key && paymentProfiles[key] ? paymentProfiles[key] : (ta.value||'');
+  }
+  function downloadPaymentsCSV(){
+    var csv='Name,Details\n';
+    Object.keys(paymentProfiles).forEach(function(n){
+      var d=(paymentProfiles[n]||'').replace(/\r?\n/g,'\n');
+      csv += '"'+n.replace(/"/g,'""')+'","'+d.replace(/"/g,'""')+'"\n';
+    });
+    var blob=new Blob([csv],{type:'text/csv'});
+    var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='payments.csv'; a.click(); URL.revokeObjectURL(a.href);
+  }
+  function onPaymentsUpload(e){
+    var file=e.target.files[0]; if(!file) return; var reader=new FileReader();
+    reader.onload=function(){
+      try{
+        var rows=parseCSV(reader.result);
+        if(!rows.length){ toast('CSV had no rows',true); return; }
+        var headers=Object.keys(rows[0]).map(function(h){return String(h).toLowerCase();});
+        var find=function(arr){ return headers.findIndex(function(h){ return arr.indexOf(h)>-1; }); };
+        var iName=find(['name','customer','profile']);
+        var iDet=find(['details','payment','payment details','instructions']);
+        if(iName<0||iDet<0){ toast('Missing Name/Details columns',true); return; }
+        var obj={};
+        rows.forEach(function(r){
+          var vals=Object.values(r);
+          var n=(vals[iName]||'').toString().trim(); if(!n) return;
+          var d=(vals[iDet]||'').toString();
+          obj[n]=d;
+        });
+        if(Object.keys(obj).length){ paymentProfiles=obj; rebuildPaymentDropdown(); toast('Payments CSV imported'); }
+        else toast('CSV had no valid payments',true);
+      }catch(err){ console.error(err); toast('Invalid payments CSV',true); }
+    };
+    reader.readAsText(file);
+  }
+
+  // ===== CSV helpers =====
+  function splitCSVRow(row){
+    var out=[], cur='', q=false;
+    for(var i=0;i<row.length;i++){
+      var ch=row[i];
+      if(ch==='"'){ if(q && row[i+1]==='"'){ cur+='"'; i++; } else { q=!q; } }
+      else if(ch===',' && !q){ out.push(cur); cur=''; }
+      else { cur+=ch; }
+    }
+    out.push(cur);
+    return out.map(function(s){ return s.trim(); });
+  }
+  function parseCSV(text){
+    var lines=text.split(/\r?\n/).filter(function(l){ return l.trim().length; });
+    if(!lines.length) return [];
+    var headers=splitCSVRow(lines.shift()).map(function(h){ return h.replace(/^"|"$/g,''); });
+    return lines.map(function(line){
+      var cells=splitCSVRow(line).map(function(c){ return c.replace(/^"|"$/g,''); });
+      var obj={}; headers.forEach(function(h,i){ obj[h]=cells[i]||''; });
+      return obj;
+    });
+  }
+
+  // ===== INVENTORY (CSV/XLSX) =====
+  function downloadInventoryCSV(){
+    var csv='Name,Unit,Price\n';
+    Object.keys(inventory).forEach(function(name){
+      var v=inventory[name]||{}; var unit=v.unit||''; var price=v.price||0;
+      csv+='"'+name+'","'+unit+'",'+price+'\n';
+    });
+    var blob=new Blob([csv],{type:'text/csv'}); var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download='inventory.csv'; a.click(); URL.revokeObjectURL(a.href);
+  }
+  function onInventoryUpload(e){
+    var file=e.target.files[0]; if(!file) return; var name=file.name.toLowerCase(); var reader=new FileReader();
+    if(name.endsWith('.csv')){
+      reader.onload=function(){
+        try{
+          var rows=parseCSV(reader.result);
+          var headers=Object.keys(rows[0]||{}).map(function(h){return h.toLowerCase();});
+          var find=function(arr){ return headers.findIndex(function(h){ return arr.indexOf(h)>-1; }); };
+          var iName=find(['name','product','item','description','item name']);
+          var iUnit=find(['unit','uom','per unit']);
+          var iPrice=find(['price','rate','unit price']);
+          var obj={};
+          rows.forEach(function(r){
+            var vals=Object.values(r);
+            var key=vals[iName]; if(!key) return;
+            var unit=iUnit>-1? vals[iUnit] : '';
+            var price=iPrice>-1? parseFloat(vals[iPrice])||0 : 0;
+            obj[String(key).trim()]={unit:unit,price:price};
+          });
+          if(Object.keys(obj).length){ inventory=obj; rebuildInventoryDropdowns(); toast('Inventory CSV imported successfully'); }
+          else toast('CSV had no valid rows', true);
+        }catch(err){ console.error(err); toast('Invalid CSV', true); }
+      };
+      reader.readAsText(file); return;
+    }
+    reader.onload=function(evt){
+      try{
+        var bytes=new Uint8Array(evt.target.result);
+        var wb=XLSX.read(bytes,{type:'array'});
+        var ws=wb.Sheets[wb.SheetNames[0]];
+        var rows=XLSX.utils.sheet_to_json(ws,{defval:''});
+        var obj={};
+        rows.forEach(function(r){
+          var key=r.Name||r.Product||r.Item||r.Description||r.ItemName||r['Item Name']; if(!key) return;
+          obj[String(key).trim()]={ unit:r.Unit||r.UOM||r['Per Unit']||'', price:parseFloat(r.Price||r.Rate||r['Unit Price']||0)||0 };
+        });
+        if(Object.keys(obj).length){ inventory=obj; rebuildInventoryDropdowns(); toast('Inventory Excel imported successfully'); }
+        else toast('No valid rows in sheet', true);
+      }catch(err){ console.error(err); toast('Failed to read Excel', true); }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+  function rebuildInventoryDropdowns(){
+    var html=optionsHTML();
+    document.querySelectorAll('select.desc').forEach(function(sel){
+      var current=sel.value;
+      sel.innerHTML='<option value="">-- Select Product --</option>'+html;
+      if(inventory[current]) sel.value=current;
+      sel.dispatchEvent(new Event('change'));
+    });
+  }
+
+  // ===== EXPORT INVOICE (Excel) =====
+  function exportInvoiceExcel(){
+    var wb=XLSX.utils.book_new();
+    var rows=[["#","Description","Qty","Per Unit","Unit Price ($)","Total ($)"]];
+    Array.prototype.forEach.call(tbodyRef.children, function(tr){
+      rows.push([
+        tr.querySelector('.idx').textContent,
+        tr.querySelector('.descPrint').textContent||tr.querySelector('.desc').value,
+        tr.querySelector('.qty').value,
+        tr.querySelector('.unit').textContent,
+        tr.querySelector('.price').value,
+        tr.querySelector('.total').textContent
+      ]);
+    });
+    rows.push([]);
+    rows.push(["Subtotal","","","","", document.getElementById('subTotal').textContent]);
+    rows.push(["GST (9%)","","","","", document.getElementById('gstAmount').textContent]);
+    rows.push(["Grand Total","","","","", document.getElementById('grandTotal').textContent]);
+    var ws=XLSX.utils.aoa_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb,ws,'Invoice');
+    XLSX.writeFile(wb,'invoice.xlsx');
+  }
+
+  // ===== STARTUP =====
+  window.addEventListener('DOMContentLoaded', function(){
+    var btn=document.getElementById('loginBtn'); if(btn) btn.addEventListener('click', function(ev){ login(ev); });
+    var usr=document.getElementById('username'); var pwd=document.getElementById('password');
+    if(pwd) pwd.addEventListener('keydown', function(e){ if(e.key==='Enter'){ login(e); }});
+    if(usr) usr.addEventListener('input', function(){ var err=document.getElementById('loginError'); if(err) err.style.display='none'; });
+    if(pwd) pwd.addEventListener('input', function(){ var err=document.getElementById('loginError'); if(err) err.style.display='none'; });
+    if(localStorage.getItem('rr_logged_in')==='1'){ showApp(); } else { document.getElementById('loginPage').style.display='flex'; document.getElementById('app').style.display='none'; }
+    updateCopyType();
+  });
+</script>
+</body>
+</html>
